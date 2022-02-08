@@ -90,6 +90,8 @@ void Error_Handler(void);
 #define ARD_D9_GPIO_Port GPIOB
 #define NJTRST_Pin GPIO_PIN_4
 #define NJTRST_GPIO_Port GPIOB
+#define MP_IGBT_Pin GPIO_PIN_13
+#define MP_IGBT_GPIO_Port GPIOG
 #define OCSPI1_IO7_Pin GPIO_PIN_7
 #define OCSPI1_IO7_GPIO_Port GPIOD
 #define OCSPI1_IO5_Pin GPIO_PIN_5
@@ -143,8 +145,8 @@ void Error_Handler(void);
 #define LCD_B2_GPIO_Port GPIOD
 #define LCD_G4_Pin GPIO_PIN_15
 #define LCD_G4_GPIO_Port GPIOH
-#define USB_FS_VBUS_Pin GPIO_PIN_9
-#define USB_FS_VBUS_GPIO_Port GPIOA
+#define MP_Relay_Pin GPIO_PIN_9
+#define MP_Relay_GPIO_Port GPIOA
 #define SDIO1_D0_Pin GPIO_PIN_8
 #define SDIO1_D0_GPIO_Port GPIOC
 #define LCD_G6_Pin GPIO_PIN_7
@@ -189,8 +191,8 @@ void Error_Handler(void);
 #define OCSPI1_IO3_GPIO_Port GPIOD
 #define SAI1_SCK_B_Pin GPIO_PIN_8
 #define SAI1_SCK_B_GPIO_Port GPIOF
-#define SAI1_MCLK_B_Pin GPIO_PIN_7
-#define SAI1_MCLK_B_GPIO_Port GPIOF
+#define PC_IGBT_Pin GPIO_PIN_7
+#define PC_IGBT_GPIO_Port GPIOF
 #define SAI1_FS_B_Pin GPIO_PIN_9
 #define SAI1_FS_B_GPIO_Port GPIOF
 #define ARD_D6_Pin GPIO_PIN_15
@@ -217,10 +219,10 @@ void Error_Handler(void);
 #define T_VCP_TX_GPIO_Port GPIOD
 #define RMII_TXD1_Pin GPIO_PIN_13
 #define RMII_TXD1_GPIO_Port GPIOB
-#define USER_LED2_Pin GPIO_PIN_2
-#define USER_LED2_GPIO_Port GPIOC
-#define USER_LED1_Pin GPIO_PIN_3
-#define USER_LED1_GPIO_Port GPIOC
+#define MN_IGBT_Pin GPIO_PIN_2
+#define MN_IGBT_GPIO_Port GPIOC
+#define MN_Relay_Pin GPIO_PIN_3
+#define MN_Relay_GPIO_Port GPIOC
 #define RMII_RXD1_Pin GPIO_PIN_5
 #define RMII_RXD1_GPIO_Port GPIOC
 #define LCD_G0_Pin GPIO_PIN_1

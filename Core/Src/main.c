@@ -32,6 +32,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define STEP_LEN 8000;
+#define INTERVAL 30000;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +56,7 @@ I2C_HandleTypeDef hi2c4;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
+TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim13;
 
 UART_HandleTypeDef huart1;
@@ -80,6 +83,7 @@ static void MX_TIM5_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM13_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -89,21 +93,54 @@ static void MX_TIM13_Init(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	if(GPIO_Pin == Button_2_Pin){
-
-		/*
-		HAL_GPIO_TogglePin(USER_LED1_GPIO_Port, USER_LED1_Pin);
-		HAL_GPIO_TogglePin(USER_LED2_GPIO_Port, USER_LED2_Pin);
-		*/
 		HAL_TIM_Base_Start(&htim13);
-		HAL_GPIO_TogglePin(USER_LED1_GPIO_Port, USER_LED1_Pin);
-
 		htim13.Instance->CNT = 0;
+
+		// 1 step: turn on MN IGBT & Relay
+		HAL_GPIO_TogglePin(GPIOC, MN_IGBT_Pin);
+		HAL_TIM_Base_Start(&htim7);
+		htim7.Instance->CNT = 0;
+		// delay btw IGBT & Relay
 		while(1){
-			if(htim13.Instance->CNT == 1000)
-			{
-				HAL_GPIO_TogglePin(USER_LED2_GPIO_Port, USER_LED2_Pin);
-				HAL_TIM_Base_Stop(&htim13);
+			if(htim7.Instance->CNT == 30000){
+				HAL_GPIO_TogglePin(GPIOC, MN_Relay_Pin);
+				HAL_TIM_Base_Stop(&htim7);
 				break;
+			}
+		}
+
+		// 2 step: turn on PC IGBT
+		while(1){
+			if(htim13.Instance->CNT == 8000){
+				HAL_GPIO_TogglePin(GPIOF, PC_IGBT_Pin);
+				break;
+			}
+		}
+
+		// 3 step: turn on MP IGBT & Relay
+		while(1){
+			if(htim13.Instance->CNT == 16000){
+				HAL_GPIO_TogglePin(GPIOG, MP_IGBT_Pin);
+				HAL_TIM_Base_Start(&htim7);
+				htim7.Instance->CNT = 0;
+				// delay btw IGBT & Relay
+				while(1){
+					if(htim7.Instance->CNT == 30000){
+						HAL_GPIO_TogglePin(GPIOA, MP_Relay_Pin);
+						HAL_TIM_Base_Stop(&htim7);
+						break;
+					}
+				}
+				break;
+			}
+		}
+
+		// 4 step: turn off PC IGBT
+		while(1){
+			if(htim13.Instance->CNT == 24000){
+			HAL_GPIO_TogglePin(GPIOF, PC_IGBT_Pin);
+			HAL_TIM_Base_Stop(&htim13);
+			break;
 			}
 		}
 	}
@@ -154,15 +191,16 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   MX_TIM13_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
-
-
+  HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, SET);
+  HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, SET);
+  HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, SET);
   while (1)
   {
     /* USER CODE END WHILE */
@@ -809,6 +847,44 @@ static void MX_TIM5_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 2750-1;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 65535;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
   * @brief TIM13 Initialization Function
   * @param None
   * @retval None
@@ -828,7 +904,7 @@ static void MX_TIM13_Init(void)
   htim13.Instance = TIM13;
   htim13.Init.Prescaler = 27500 -1;
   htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim13.Init.Period = 10000 - 1;
+  htim13.Init.Period = 65535;
   htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim13) != HAL_OK)
@@ -975,14 +1051,17 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOE, ARD_D8_Pin|STMOD_17_Pin|STMOD_19_Pin|STMOD_18_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, LCD_BL_CTRL_Pin|ARD_D7_Pin|MEMS_LED_Pin|ARD_D4_Pin
-                          |ARD_D2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin|LCD_BL_CTRL_Pin|ARD_D7_Pin|MEMS_LED_Pin
+                          |ARD_D4_Pin|ARD_D2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, USER_LED2_Pin|USER_LED1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(MP_Relay_GPIO_Port, MP_Relay_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(STMOD_20_GPIO_Port, STMOD_20_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin|STMOD_20_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin|MN_Relay_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOH, LCD_RST_Pin|USB_FS_PWR_EN_Pin, GPIO_PIN_RESET);
@@ -1050,6 +1129,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF14_LTDC;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : MP_IGBT_Pin LCD_BL_CTRL_Pin ARD_D7_Pin MEMS_LED_Pin
+                           ARD_D4_Pin ARD_D2_Pin */
+  GPIO_InitStruct.Pin = MP_IGBT_Pin|LCD_BL_CTRL_Pin|ARD_D7_Pin|MEMS_LED_Pin
+                          |ARD_D4_Pin|ARD_D2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
   /*Configure GPIO pins : OCSPI1_IO7_Pin OCSPI1_IO5_Pin OCSPI1_IO4_Pin */
   GPIO_InitStruct.Pin = OCSPI1_IO7_Pin|OCSPI1_IO5_Pin|OCSPI1_IO4_Pin;
@@ -1130,15 +1218,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF10_OTG1_HS;
   HAL_GPIO_Init(USB_FS_ID_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LCD_BL_CTRL_Pin ARD_D7_Pin MEMS_LED_Pin ARD_D4_Pin
-                           ARD_D2_Pin */
-  GPIO_InitStruct.Pin = LCD_BL_CTRL_Pin|ARD_D7_Pin|MEMS_LED_Pin|ARD_D4_Pin
-                          |ARD_D2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
-
   /*Configure GPIO pins : LCD_G4_Pin LCD_R5_Pin LCD_R3_Pin LCD_R2_Pin
                            LCD_R4_Pin LCD_R1_Pin */
   GPIO_InitStruct.Pin = LCD_G4_Pin|LCD_R5_Pin|LCD_R3_Pin|LCD_R2_Pin
@@ -1148,6 +1227,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   GPIO_InitStruct.Alternate = GPIO_AF14_LTDC;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MP_Relay_Pin */
+  GPIO_InitStruct.Pin = MP_Relay_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MP_Relay_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LCD_G6_Pin LCD_HSYNC_Pin */
   GPIO_InitStruct.Pin = LCD_G6_Pin|LCD_HSYNC_Pin;
@@ -1189,8 +1275,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(CTP_INT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : SAI1_SD_B_Pin SAI1_SCK_B_Pin SAI1_MCLK_B_Pin SAI1_FS_B_Pin */
-  GPIO_InitStruct.Pin = SAI1_SD_B_Pin|SAI1_SCK_B_Pin|SAI1_MCLK_B_Pin|SAI1_FS_B_Pin;
+  /*Configure GPIO pins : SAI1_SD_B_Pin SAI1_SCK_B_Pin SAI1_FS_B_Pin */
+  GPIO_InitStruct.Pin = SAI1_SD_B_Pin|SAI1_SCK_B_Pin|SAI1_FS_B_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1210,6 +1296,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF9_OCTOSPIM_P1;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PC_IGBT_Pin STMOD_20_Pin */
+  GPIO_InitStruct.Pin = PC_IGBT_Pin|STMOD_20_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
   /*Configure GPIO pin : OCSPI1_CLK_Pin */
   GPIO_InitStruct.Pin = OCSPI1_CLK_Pin;
@@ -1235,8 +1328,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : USER_LED2_Pin USER_LED1_Pin */
-  GPIO_InitStruct.Pin = USER_LED2_Pin|USER_LED1_Pin;
+  /*Configure GPIO pins : MN_IGBT_Pin MN_Relay_Pin */
+  GPIO_InitStruct.Pin = MN_IGBT_Pin|MN_Relay_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1279,13 +1372,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(Audio_Int_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : STMOD_20_Pin */
-  GPIO_InitStruct.Pin = STMOD_20_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(STMOD_20_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : STMOD_11_INT_Pin */
   GPIO_InitStruct.Pin = STMOD_11_INT_Pin;
