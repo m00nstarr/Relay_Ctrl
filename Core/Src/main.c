@@ -32,8 +32,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define STEP_LEN 8000;
-#define INTERVAL 30000;
+#ifdef __GNUC__
+/* With GCC, small printf (option LD Linker->Libraries->Small printf
+   set to 'Yes') calls __io_putchar() */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,6 +58,8 @@ FDCAN_HandleTypeDef hfdcan2;
 
 I2C_HandleTypeDef hi2c4;
 
+RTC_HandleTypeDef hrtc;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
@@ -63,7 +70,19 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+PUTCHAR_PROTOTYPE
+{
+  /* Place your implementation of fputc here */
+  /* e.g. write a character to the USART1 and Loop until the end of transmission */
+  HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xFFFF);
 
+  return ch;
+}
+
+volatile unsigned int timing_counter = 0; // for timing control in autostart, stop
+
+uint32_t timestamp;
+uint32_t timespan;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -84,65 +103,72 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM13_Init(void);
 static void MX_TIM7_Init(void);
+static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void print_timestamp(){
+
+	timestamp = HAL_GetTick();
+	timespan = timestamp - timespan;
+
+	printf("timing_counter(%d): %ld\r\n", timing_counter, timestamp);
+	if(timing_counter > 0){
+		printf("%ld ms ellapsed after prev timestamp. \r\n", timespan);
+	}
+	printf("--------------------\r\n");
+
+	timespan = timestamp;
+}
+
+void autostart(){
+	if(timing_counter == 0){
+		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
+		print_timestamp();
+	}
+	else if(timing_counter == 1){
+		HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
+		print_timestamp();
+	}
+	else if(timing_counter == 10){
+		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, SET);
+		print_timestamp();
+	}
+	else if(timing_counter == 20){
+		HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, RESET);
+		print_timestamp();
+	}
+	else if(timing_counter == 21){
+		HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, SET);
+		print_timestamp();
+	}
+	else if(timing_counter == 30){
+		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
+		print_timestamp();
+		HAL_TIM_Base_Stop_IT(&htim13);
+		timing_counter = -1;
+	}
+	timing_counter += 1;
+}
+
+//Timer interrupted every 0.4ms
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim->Instance == TIM13){
+		autostart();
+	}
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	if(GPIO_Pin == Button_2_Pin){
-		HAL_TIM_Base_Start(&htim13);
-		htim13.Instance->CNT = 0;
-
-		// 1 step: turn on MN IGBT & Relay
-		HAL_GPIO_TogglePin(GPIOC, MN_IGBT_Pin);
-		HAL_TIM_Base_Start(&htim7);
-		htim7.Instance->CNT = 0;
-		// delay btw IGBT & Relay
-		while(1){
-			if(htim7.Instance->CNT == 30000){
-				HAL_GPIO_TogglePin(GPIOC, MN_Relay_Pin);
-				HAL_TIM_Base_Stop(&htim7);
-				break;
-			}
-		}
-
-		// 2 step: turn on PC IGBT
-		while(1){
-			if(htim13.Instance->CNT == 8000){
-				HAL_GPIO_TogglePin(GPIOF, PC_IGBT_Pin);
-				break;
-			}
-		}
-
-		// 3 step: turn on MP IGBT & Relay
-		while(1){
-			if(htim13.Instance->CNT == 16000){
-				HAL_GPIO_TogglePin(GPIOG, MP_IGBT_Pin);
-				HAL_TIM_Base_Start(&htim7);
-				htim7.Instance->CNT = 0;
-				// delay btw IGBT & Relay
-				while(1){
-					if(htim7.Instance->CNT == 30000){
-						HAL_GPIO_TogglePin(GPIOA, MP_Relay_Pin);
-						HAL_TIM_Base_Stop(&htim7);
-						break;
-					}
-				}
-				break;
-			}
-		}
-
-		// 4 step: turn off PC IGBT
-		while(1){
-			if(htim13.Instance->CNT == 24000){
-			HAL_GPIO_TogglePin(GPIOF, PC_IGBT_Pin);
-			HAL_TIM_Base_Stop(&htim13);
-			break;
-			}
-		}
+		HAL_TIM_Base_Start_IT(&htim13);
+		// step 1: turn on MN IGBT & Relay
+		//HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
+		//HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
 	}
 }
 /* USER CODE END 0 */
@@ -192,6 +218,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_TIM13_Init();
   MX_TIM7_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -201,6 +228,7 @@ int main(void)
   HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, SET);
   HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, SET);
   HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, SET);
+
   while (1)
   {
     /* USER CODE END WHILE */
@@ -233,8 +261,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 5;
@@ -672,6 +701,69 @@ static void MX_I2C4_Init(void)
 }
 
 /**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  hrtc.Init.OutPutRemap = RTC_OUTPUT_REMAP_NONE;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x22;
+  sTime.Minutes = 0x22;
+  sTime.Seconds = 0x22;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_THURSDAY;
+  sDate.Month = RTC_MONTH_FEBRUARY;
+  sDate.Date = 0x10;
+  sDate.Year = 0x22;
+
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
+
+}
+
+/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -904,7 +996,7 @@ static void MX_TIM13_Init(void)
   htim13.Instance = TIM13;
   htim13.Init.Prescaler = 27500 -1;
   htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim13.Init.Period = 65535;
+  htim13.Init.Period = 4000-1;
   htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim13) != HAL_OK)
@@ -924,7 +1016,6 @@ static void MX_TIM13_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM13_Init 2 */
-
   /* USER CODE END TIM13_Init 2 */
 
 }
