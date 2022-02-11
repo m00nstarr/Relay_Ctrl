@@ -112,13 +112,15 @@ static void MX_RTC_Init(void);
 /* USER CODE BEGIN 0 */
 void print_timestamp(){
 
-	timestamp = HAL_GetTick();
+	//timestamp = HAL_GetTick();
+	timestamp = timing_counter*400 + TIM13->CNT *10 ;
 	timespan = timestamp - timespan;
 
-	printf("timing_counter(%d): %ld\r\n", timing_counter, timestamp);
+	printf("timing_counter(%d): %ld\r\n", timing_counter, timestamp*10);
 	if(timing_counter > 0){
-		printf("%ld ms ellapsed after prev timestamp. \r\n", timespan);
+		printf("%ld ms ellapsed after prev timestamp. \r\n", timespan*10);
 	}
+
 	printf("--------------------\r\n");
 
 	timespan = timestamp;
@@ -154,7 +156,7 @@ void autostart(){
 	timing_counter += 1;
 }
 
-//Timer interrupted every 0.4ms
+//Timer interrupted every 0.4s
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim->Instance == TIM13){
@@ -225,6 +227,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  timespan = 0;
   HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, SET);
   HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, SET);
   HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, SET);
