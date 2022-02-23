@@ -39,6 +39,12 @@
 #else
 #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #endif /* __GNUC__ */
+
+#define FIX_TIMER_TRIGGER(handle_ptr) (__HAL_TIM_CLEAR_FLAG(handle_ptr, TIM_SR_UIF))
+
+#define MN_ON 0
+#define MP_ON 1
+#define OFF 2
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,8 +69,11 @@ RTC_HandleTypeDef hrtc;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
 TIM_HandleTypeDef htim5;
+TIM_HandleTypeDef htim7;
 TIM_HandleTypeDef htim13;
 TIM_HandleTypeDef htim14;
+TIM_HandleTypeDef htim16;
+TIM_HandleTypeDef htim17;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
@@ -79,9 +88,11 @@ PUTCHAR_PROTOTYPE
   return ch;
 }
 
-volatile unsigned int timing_counter = 0; // for timing control in autostart, stop
+//volatile unsigned int timing_counter = 0; // for timing control in autostart, stop
 
-uint32_t timestamp[2000];
+int tim7_status;
+
+uint32_t timestamp[2000][2];
 uint32_t id = 0;
 
 /* USER CODE END PV */
@@ -105,14 +116,18 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM13_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM14_Init(void);
+static void MX_TIM7_Init(void);
+static void MX_TIM16_Init(void);
+static void MX_TIM17_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void save_timestamp(){
-	timestamp[id] = TIM14->CNT;
+void save_timestamp(int x){
+	timestamp[id][0] = x;
+	timestamp[id][1] = TIM14->CNT / 100;
 	//timestamp[id] = uwTick;
 	id++;
 }
@@ -122,62 +137,104 @@ void print_timestamp(){
 	int k = 0;
 	i = 0;
 	for (i=0; i<id; i++){
-		if (timestamp[i] <= timestamp[i-1])
-			tmp = 65535 + timestamp[i] - timestamp[i-1];
+		if (timestamp[i][1] <= timestamp[i-1][1])
+			tmp = 65535 + timestamp[i][1] - timestamp[i-1][1];
 		else
-			tmp = timestamp[i] - timestamp[i-1];
-		printf("(%d) %ld us ellapsed after prev timestamp. \r\n", i+1, tmp);
+			tmp = timestamp[i][1] - timestamp[i-1][1];
+		printf("(%d) %ld ms ellapsed after prev timestamp. \r\n", timestamp[i][0], tmp);
 		printf("--------------------\r\n");
 	}
 
 }
 
-void autostart(){
-	if(timing_counter == 0){
-		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
-		TIM14->CNT = 0;
-		HAL_TIM_Base_Start(&htim14);
-	}
-	else if(timing_counter == 1){
-		HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
-		save_timestamp();
-	}
-	else if(timing_counter == 10){
-		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, SET);
-		save_timestamp();
-	}
-	else if(timing_counter == 20){
-		HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, RESET);
-		save_timestamp();
-	}
-	else if(timing_counter == 21){
-		HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, SET);
-		save_timestamp();
-	}
-	else if(timing_counter == 30){
-		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
-		save_timestamp();
-		HAL_TIM_Base_Stop_IT(&htim13);
-		HAL_TIM_Base_Stop(&htim14);
-		timing_counter = -1;
-		print_timestamp();
-		id = 0;
-	}
-	timing_counter += 1;
-}
+//void autostart(){
+//	if(timing_counter == 0){
+//		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
+//		TIM14->CNT = 0;
+//		HAL_TIM_Base_Start(&htim14);
+//	}
+//	else if(timing_counter == 1){
+//		HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
+//		save_timestamp();
+//	}
+//	else if(timing_counter == 10){
+//		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, SET);
+//		save_timestamp();
+//	}
+//	else if(timing_counter == 20){
+//		HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, RESET);
+//		save_timestamp();
+//	}
+//	else if(timing_counter == 21){
+//		HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, SET);
+//		save_timestamp();
+//	}
+//	else if(timing_counter == 30){
+//		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
+//		save_timestamp();
+//		HAL_TIM_Base_Stop_IT(&htim13);
+//		HAL_TIM_Base_Stop(&htim14);
+//		timing_counter = -1;
+//		print_timestamp();
+//		id = 0;
+//	}
+//	timing_counter += 1;
+//}
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+	if (htim->Instance == TIM7){
+		switch(tim7_status){
+			case MN_ON:
+				HAL_TIM_Base_Stop_IT(&htim7);
+				HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
+				save_timestamp(0);
+				tim7_status = MP_ON;
+				break;
+			case MP_ON:
+				HAL_TIM_Base_Stop_IT(&htim7);
+				HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, SET);
+				save_timestamp(3);
+				tim7_status = MN_ON;
+		}
+
+	}
 	if (htim->Instance == TIM13){
-		autostart();
+		HAL_TIM_Base_Stop_IT(&htim13);
+		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, SET);
+		save_timestamp(1);
+	}
+	if (htim->Instance == TIM16){
+		HAL_TIM_Base_Stop_IT(&htim16);
+		HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, RESET);
+		save_timestamp(2);
+		TIM7->CNT = 0;
+		FIX_TIMER_TRIGGER(&htim7);
+		HAL_TIM_Base_Start_IT(&htim7);
+	}
+	if (htim->Instance == TIM17){
+		HAL_TIM_Base_Stop_IT(&htim17);
+		save_timestamp(4);
+		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
+		print_timestamp();
 	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	if(GPIO_Pin == Button_2_Pin){
-		TIM14->CNT = 0;
+		// TIM14->CNT = 0;
+		HAL_TIM_Base_Start(&htim14);
+		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
+		tim7_status = MN_ON;
+		FIX_TIMER_TRIGGER(&htim7);
+		HAL_TIM_Base_Start_IT(&htim7);
+		FIX_TIMER_TRIGGER(&htim13);
 		HAL_TIM_Base_Start_IT(&htim13);
+		FIX_TIMER_TRIGGER(&htim16);
+		HAL_TIM_Base_Start_IT(&htim16);
+		FIX_TIMER_TRIGGER(&htim17);
+		HAL_TIM_Base_Start_IT(&htim17);
 	}
 }
 /* USER CODE END 0 */
@@ -228,6 +285,9 @@ int main(void)
   MX_TIM13_Init();
   MX_RTC_Init();
   MX_TIM14_Init();
+  MX_TIM7_Init();
+  MX_TIM16_Init();
+  MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -948,6 +1008,44 @@ static void MX_TIM5_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 27500-1;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 500-1;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
   * @brief TIM13 Initialization Function
   * @param None
   * @retval None
@@ -963,9 +1061,9 @@ static void MX_TIM13_Init(void)
 
   /* USER CODE END TIM13_Init 1 */
   htim13.Instance = TIM13;
-  htim13.Init.Prescaler = 2750 -1;
+  htim13.Init.Prescaler = 27500 -1;
   htim13.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim13.Init.Period = 5000-1;
+  htim13.Init.Period = 1500-1;
   htim13.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim13.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim13) != HAL_OK)
@@ -1005,6 +1103,70 @@ static void MX_TIM14_Init(void)
   /* USER CODE BEGIN TIM14_Init 2 */
 
   /* USER CODE END TIM14_Init 2 */
+
+}
+
+/**
+  * @brief TIM16 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM16_Init(void)
+{
+
+  /* USER CODE BEGIN TIM16_Init 0 */
+
+  /* USER CODE END TIM16_Init 0 */
+
+  /* USER CODE BEGIN TIM16_Init 1 */
+
+  /* USER CODE END TIM16_Init 1 */
+  htim16.Instance = TIM16;
+  htim16.Init.Prescaler = 27500-1;
+  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim16.Init.Period = 3500-1;
+  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim16.Init.RepetitionCounter = 0;
+  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM16_Init 2 */
+
+  /* USER CODE END TIM16_Init 2 */
+
+}
+
+/**
+  * @brief TIM17 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM17_Init(void)
+{
+
+  /* USER CODE BEGIN TIM17_Init 0 */
+
+  /* USER CODE END TIM17_Init 0 */
+
+  /* USER CODE BEGIN TIM17_Init 1 */
+
+  /* USER CODE END TIM17_Init 1 */
+  htim17.Instance = TIM17;
+  htim17.Init.Prescaler = 27500-1;
+  htim17.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim17.Init.Period = 5000-1;
+  htim17.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim17.Init.RepetitionCounter = 0;
+  htim17.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim17) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM17_Init 2 */
+
+  /* USER CODE END TIM17_Init 2 */
 
 }
 
