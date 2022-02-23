@@ -112,20 +112,21 @@ static void MX_TIM14_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void save_timestamp(){
-	timestamp[id] = TIM14->CNT / 10;
+	timestamp[id] = TIM14->CNT;
 	//timestamp[id] = uwTick;
 	id++;
 }
 
 void print_timestamp(){
-
-	//timestamp = HAL_GetTick();
-	int i;
+	int i, tmp;
+	int k = 0;
+	i = 0;
 	for (i=0; i<id; i++){
-		printf("timing_counter(%d): %ld\r\n", i, timestamp[i]);
-		if(i > 0){
-				printf("%ld ms ellapsed after prev timestamp. \r\n", timestamp[i] - timestamp[i-1]);
-			}
+		if (timestamp[i] <= timestamp[i-1])
+			tmp = 65535 + timestamp[i] - timestamp[i-1];
+		else
+			tmp = timestamp[i] - timestamp[i-1];
+		printf("(%d) %ld us ellapsed after prev timestamp. \r\n", i+1, tmp);
 		printf("--------------------\r\n");
 	}
 
@@ -134,7 +135,8 @@ void print_timestamp(){
 void autostart(){
 	if(timing_counter == 0){
 		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
-		save_timestamp();
+		TIM14->CNT = 0;
+		HAL_TIM_Base_Start(&htim14);
 	}
 	else if(timing_counter == 1){
 		HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
@@ -156,14 +158,14 @@ void autostart(){
 		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
 		save_timestamp();
 		HAL_TIM_Base_Stop_IT(&htim13);
-		HAL_TIM_Base_Stop_IT(&htim14);
+		HAL_TIM_Base_Stop(&htim14);
 		timing_counter = -1;
 		print_timestamp();
+		id = 0;
 	}
 	timing_counter += 1;
 }
 
-//Timer interrupted every 0.4s
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim->Instance == TIM13){
@@ -175,11 +177,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	if(GPIO_Pin == Button_2_Pin){
 		TIM14->CNT = 0;
-		HAL_TIM_Base_Start_IT(&htim14);
 		HAL_TIM_Base_Start_IT(&htim13);
-		// step 1: turn on MN IGBT & Relay
-		//HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
-		//HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
 	}
 }
 /* USER CODE END 0 */
@@ -995,7 +993,7 @@ static void MX_TIM14_Init(void)
 
   /* USER CODE END TIM14_Init 1 */
   htim14.Instance = TIM14;
-  htim14.Init.Prescaler = 27500-1;
+  htim14.Init.Prescaler = 2750-1;
   htim14.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim14.Init.Period = 65535;
   htim14.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
