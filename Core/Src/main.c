@@ -90,10 +90,13 @@ PUTCHAR_PROTOTYPE
 
 //volatile unsigned int timing_counter = 0; // for timing control in autostart, stop
 
-int tim7_status;
+// status variables
+int tim7_status; // check if mp relay on/mn relay on/mp,mn relay off
+int signal_status = 1; // check if on(auto_start)/off(stop) signal
 
+// variables for printing the timing logs
 uint32_t timestamp[2000][2];
-uint32_t id = 0;
+uint32_t id = 0; // timestamp arr index
 
 /* USER CODE END PV */
 
@@ -125,6 +128,8 @@ static void MX_TIM17_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// save current tim14 cnt with given sequence step(x)
 void save_timestamp(int x){
 	timestamp[id][0] = x;
 	timestamp[id][1] = TIM14->CNT / 100;
@@ -132,11 +137,13 @@ void save_timestamp(int x){
 	id++;
 }
 
+// print the timestamps saved before
 void print_timestamp(){
 	int i, tmp;
 	int k = 0;
 	i = 0;
 	for (i=0; i<id; i++){
+		// when cnt is overflowed
 		if (timestamp[i][1] <= timestamp[i-1][1])
 			tmp = 65535 + timestamp[i][1] - timestamp[i-1][1];
 		else
@@ -181,60 +188,94 @@ void print_timestamp(){
 //	timing_counter += 1;
 //}
 
+// timers interrupt handler routine
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if (htim->Instance == TIM7){
 		switch(tim7_status){
-			case MN_ON:
+			case MN_ON: // mn relay on
 				HAL_TIM_Base_Stop_IT(&htim7);
 				HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, RESET);
 				save_timestamp(0);
-				tim7_status = MP_ON;
+				tim7_status = MP_ON; // toggle timer status
 				break;
-			case MP_ON:
+			case MP_ON: // mp relay on
 				HAL_TIM_Base_Stop_IT(&htim7);
 				HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, SET);
 				save_timestamp(3);
-				tim7_status = MN_ON;
+				break;
+			case OFF: // mn, mp igbt off
+				HAL_TIM_Base_Stop_IT(&htim7);
+				HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, SET);
+				HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, SET);
+				save_timestamp(5);
+				HAL_TIM_Base_Stop(&htim14);
+				print_timestamp();
+				id = 0; // reset the timestamp id
 		}
 
 	}
-	if (htim->Instance == TIM13){
+	if (htim->Instance == TIM13){ // pc igbt on
 		HAL_TIM_Base_Stop_IT(&htim13);
 		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, SET);
 		save_timestamp(1);
 	}
-	if (htim->Instance == TIM16){
+	if (htim->Instance == TIM16){ // mp igbt on
 		HAL_TIM_Base_Stop_IT(&htim16);
 		HAL_GPIO_WritePin(GPIOG, MP_IGBT_Pin, RESET);
 		save_timestamp(2);
-		TIM7->CNT = 0;
-		FIX_TIMER_TRIGGER(&htim7);
+		TIM7->CNT = 0; // reset tim 7 for precise timing(50ms)
+		FIX_TIMER_TRIGGER(&htim7); // start timer mp relay on
 		HAL_TIM_Base_Start_IT(&htim7);
 	}
-	if (htim->Instance == TIM17){
+	if (htim->Instance == TIM17){ // pc igbt off
 		HAL_TIM_Base_Stop_IT(&htim17);
-		save_timestamp(4);
 		HAL_GPIO_WritePin(GPIOF, PC_IGBT_Pin, RESET);
+		save_timestamp(4);
+		HAL_TIM_Base_Stop(&htim14);
 		print_timestamp();
+		id = 0; // reset the timestamp id
 	}
 }
 
+// interrupt routine for user button pushed
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 
 	if(GPIO_Pin == Button_2_Pin){
-		// TIM14->CNT = 0;
+		// turn on the timer for checking timing
+		TIM14->CNT = 0;
 		HAL_TIM_Base_Start(&htim14);
-		HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
-		tim7_status = MN_ON;
-		FIX_TIMER_TRIGGER(&htim7);
-		HAL_TIM_Base_Start_IT(&htim7);
-		FIX_TIMER_TRIGGER(&htim13);
-		HAL_TIM_Base_Start_IT(&htim13);
-		FIX_TIMER_TRIGGER(&htim16);
-		HAL_TIM_Base_Start_IT(&htim16);
-		FIX_TIMER_TRIGGER(&htim17);
-		HAL_TIM_Base_Start_IT(&htim17);
+		// if cur signal == auto_start
+		if (signal_status){
+			// turn on mn igbt
+			HAL_GPIO_WritePin(GPIOC, MN_IGBT_Pin, RESET);
+			tim7_status = MN_ON;
+			// turn on mn relay
+			FIX_TIMER_TRIGGER(&htim7);
+			HAL_TIM_Base_Start_IT(&htim7);
+			// turn on pc igbt
+			FIX_TIMER_TRIGGER(&htim13);
+			HAL_TIM_Base_Start_IT(&htim13);
+			// turn on mp igbt
+			FIX_TIMER_TRIGGER(&htim16);
+			HAL_TIM_Base_Start_IT(&htim16);
+			// turn off pc relay
+			FIX_TIMER_TRIGGER(&htim17);
+			HAL_TIM_Base_Start_IT(&htim17);
+		}
+		// if cur signal == stop
+		if (!signal_status){
+			// turn off mn relay, mp relay
+			HAL_GPIO_WritePin(GPIOC, MN_Relay_Pin, SET);
+			HAL_GPIO_WritePin(GPIOA, MP_Relay_Pin, RESET);
+			// turn off mn igbt, mp igbt
+			tim7_status = OFF;
+			TIM7->CNT = 0; // reset tim 7 for precise timing(50ms)
+			FIX_TIMER_TRIGGER(&htim7);
+			HAL_TIM_Base_Start_IT(&htim7);
+		}
+		// toggle the signal_status (temporary)
+		signal_status = !signal_status;
 	}
 }
 /* USER CODE END 0 */
